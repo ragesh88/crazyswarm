@@ -25,3 +25,9 @@
 [submodule "ros_ws/src/crazyflie_ros"]
 	path = ros_ws/src/crazyflie_ros
 	url = https://github.com/whoenig/crazyflie_ros.git
+[submodule "ros_ws/src/crazyswarm/scripts/crazyswarm-planning"]
+	path = ros_ws/src/crazyswarm/scripts/crazyswarm-planning
+	url = https://github.com/ragesh88/crazyswarm-planning.git
+[submodule "ros_ws/src/crazyswarm/scripts/resilient_coverage_team_selection"]
+	path = ros_ws/src/crazyswarm/scripts/resilient_coverage_team_selection
+	url = https://github.com/ragesh88/resilient_coverage_team_selection.git
