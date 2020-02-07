@@ -34,8 +34,7 @@ def main():
     path_folder = ''
 
     # parameters in the program
-    # bounding box for reconfiguring the system
-    b_box = []
+
     #
     # DATA LOADING
     #
