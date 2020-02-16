@@ -4,6 +4,7 @@ ros_ws/devel/
 *.pyc
 *~
 *.mexa64
+.idea/
 # james's symlinks :)
 cfs.yaml
 firm
