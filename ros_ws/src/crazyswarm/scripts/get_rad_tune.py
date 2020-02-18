@@ -86,8 +86,8 @@ def get_rad_tune(b_box, Rob_active_lab, fail_rob_lab, Rob_active_pos,
 
     tk.mainloop()
     # return selected radius
-    rad_tune = w1.get()#/float(scale)
-    print "inside function", rad_tune
+    rad_tune = w1.get()
+    # print "inside function", rad_tune
     return rad_tune
 
 
