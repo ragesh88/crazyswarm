@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 from __future__ import print_function
+from get_rad_tune import get_rad_tune
 
 import argparse
 import os
@@ -67,7 +68,9 @@ def main():
     # but id's don't need to be 1..N.
     crazyflies = sorted(crazyflies, key=lambda cf: cf.id)
     # the map between matlab index and robot id of the robots
-    Rob_mat_lab = {i: cf.id for cf, i in zip(crazyflies, range(1, A_n+1))}
+    Rob_lab2id = {i: cf.id for cf, i in zip(crazyflies, range(1, A_n+1))}
+    # the map between robot id and matlab index of the robots
+    Rob_id2lab = {cf.id: i for cf, i in zip(crazyflies, range(1, A_n + 1))}
     # the dictionary containing the states {HOVER, MOVE, FAILED, LANDING} of different robots
     Rob_state = {cf.id: MOVE for cf in crazyflies}
 
@@ -141,17 +144,55 @@ def main():
     # transposed copy - by timestep instead of robot
     seqs_t = zip(*seqs)
 
-    Rob_active_mat = np.ones((A_n, 1))  # matlab index of active robots
+    Rob_active_mat = np.ones((A_n, 1))  # vector indicating active robots
+    # list containing the matlab indices of the active robots
+    Rob_active_lab_mat = range(1, A_n+1)
 
 
 
     # main loop!
-    for i_1 in range(A_n):
+    for i_1 in range(A_n-1):
+        # get the position of all active robots
+        j_1 = 0
+        for lab in Rob_active_lab_mat:
+            for cf in crazyflies:
+                if cf.id == Rob_lab2id[lab]:
+                    Rob_active_pos[j_1, :] = cf.position()[:, 0:2]
+                    j_1 += 1
+                    break
+        Rob_active_pos = Rob_active_pos[:, 0:j_1]
         # randomly select a robot to fail
-        indx = math.floor(np.random.uniform()*Rob_active_mat.sum())
+        # we assume its a matlab index
+        indx = math.floor(np.random.uniform()*(Rob_active_mat.sum()))
         if indx == 0:
             indx = 1
-        # TODO
+        fail_rob_lab_mat = Rob_active_lab_mat[indx - 1]
+        Rob_active_mat[fail_rob_lab_mat - 1] = 0
+        # find the position of the failed robot
+        for cf in crazyflies:
+            if cf.id == Rob_lab2id[fail_rob_lab_mat]:
+                fail_rob_pos = cf.position()[:, 0:2]
+        # get radius tune from the user
+        rad_tune = get_rad_tune(b_box, Rob_active_lab_mat, fail_rob_lab_mat, Rob_active_pos, fail_rob_pos)
+        # set state of failed robot and make it land
+        Rob_state[fail_rob_lab_mat] = FAILED
+        # land() # TODO add a function to make the robot land
+        # call the matlab function to get trajectories, robot labels in failed neighborhood
+        mat_out = matlab_get_trajectories(eng) # TODO complete this
+        fail_trjs = mat_out[0]  # trajectories of the robots in the failed robot nbh
+        fail_rob_nbh = mat_out[1]  # trajectories matches the elements and are sorted
+        com_rob_nbh = mat_out[2]
+        Rob_active_lab_mat = com_rob_nbh + fail_rob_nbh
+        # set the states of the robots
+        for lab in Rob_active_lab_mat:
+            if lab in fail_rob_nbh:
+                Rob_state[lab] = MOVE
+            if lab in com_rob_nbh:
+                Rob_state[lab] = HOVER
+
+
+
+
 
 
 
@@ -207,6 +248,40 @@ def poll_trajs(crazyflies, timeHelper, trajs, timescale):
         #timeHelper.sleep(1e-6)
 
 
+def my_poll_trajs(crazyflies, timeHelper, trajs, timescale, Robot_state, Rob_lab2id, Rob_id2lab,
+                  com_rob_nbh, fail_rob_nbh):
+    duration = trajs[0].duration
+    rob_lab_mat = sorted(Robot_state.keys())
+    start_time = rospy.Time.now()
+    rate = rospy.Rate(100)  # hz
+    zero = np.zeros(3)
+    while not rospy.is_shutdown():
+        t = (rospy.Time.now() - start_time).to_sec() / timescale
+        if t > duration:
+            break
+        for cf, lab in zip(crazyflies, rob_lab_mat):
+            if lab in fail_rob_nbh:
+                # they need to move
+                indx = fail_rob_nbh.index(lab)
+                ev = trajs[indx].eval(t)
+                cf.cmdFullState(
+                    ev.pos,
+                    ev.vel,
+                    ev.acc,
+                    ev.yaw,
+                    ev.omega)
+            if lab in com_rob_nbh:
+                # they need to hover
+                indx = com_rob_nbh.index(lab)
+                cf.cmdFullState(
+                    cf.position(),
+                    zero,
+                    zero,
+                    0.0,
+                    zero)
+        rate.sleep()
+
+
 def poll_planners(crazyflies, timeHelper, planners, duration):
     start_time = rospy.Time.now()
     rate = rospy.Rate(100) # hz
@@ -260,6 +335,11 @@ def load_all_csvs(path):
     for t, csv in zip(trajs, csvs):
         t.loadcsv(os.path.join(path, csv))
     return trajs
+
+
+def matlab_get_trajectories(eng):
+    # implement the function
+    pass
 
 
 if __name__ == "__main__":

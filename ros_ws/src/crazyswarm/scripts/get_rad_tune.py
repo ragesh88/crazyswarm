@@ -3,7 +3,7 @@ import numpy as np
 
 
 def get_rad_tune(b_box, Rob_active_lab, fail_rob_lab, Rob_active_pos,
-                 fail_rob_pos, rad_tune=0.5):
+                 fail_rob_pos, rad_tune=2):
     """
     This function creates a tkinter gui enabling the user to chose a radius
     of appropriate size to pick the surrounding neighbours
