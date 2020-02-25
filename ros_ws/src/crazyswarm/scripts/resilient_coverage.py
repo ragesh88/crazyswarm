@@ -6,6 +6,9 @@ import argparse
 import os
 import os.path
 import rospy
+import math
+
+import _multiprocessing
 
 import numpy as np
 import csv
@@ -35,9 +38,42 @@ def main():
     # path to the folder containing the generated path
     data_folder = '/media/ragesh/Disk1/data/resilient_coverage/exp/'
 
-    # parameters in the program
+    # timing parameters
+    timescale = 1.0
+    pause_between = 1.5
+    takeoff_time = 3.0
+    land_time = 4.0
+
+    # parameters for the team
     A_n = 7  # number of robots
-    Rob_active = range(1, A_n+1)  # indices of all robots
+    # define the possible quadrotor states
+    HOVER = 0
+    MOVE = 1
+    FAILED = 2
+    LANDING = 3
+
+    #
+    # CRAZYSWARM INITIALIZATION
+    #
+    swarm = Crazyswarm()
+    timeHelper = swarm.timeHelper
+    allcfs = swarm.allcfs
+    crazyflies = allcfs.crazyflies
+
+    # prepare the robot for take off
+    # check that crazyflies.yaml initial positions match sequences.
+    # only compare xy positions.
+    # assume that cf id numerical order matches sequence order,
+    # but id's don't need to be 1..N.
+    crazyflies = sorted(crazyflies, key=lambda cf: cf.id)
+    # the map between matlab index and robot id of the robots
+    Rob_mat_lab = {i: cf.id for cf, i in zip(crazyflies, range(1, A_n+1))}
+    # the dictionary containing the states {HOVER, MOVE, FAILED, LANDING} of different robots
+    Rob_state = {cf.id: MOVE for cf in crazyflies}
+
+    # make the robots to take off all together
+    # initial start pos to generate trajectories for the robots
+    # to find initial max coverage position
     Rob_start_pos = np.array([[0.0, -1.5, 1.5],
                               [0.0, -1.0, 1.5],
                               [0.0, -0.5, 1.5],
@@ -45,9 +81,6 @@ def main():
                               [0.0, 0.5, 1.5],
                               [0.0, 1.0, 1.5],
                               [0.0, 1.5, 1.5]])
-    #
-    # DATA LOADING
-    #
 
     # generate the initial coordinates and trajectory for the robots
     eng = matlab.engine.start_matlab()
@@ -62,12 +95,16 @@ def main():
     seqs = [load_all_csvs(os.path.join(data_folder, d)) for d in robot_dirs]
     steps = len(seqs[0])
 
-    print("initial trajectoring loading complete")
+    init_positions = np.stack([cf.initialPosition for cf in crazyflies])
+    evals = [seq[0].eval(0.0).pos for seq in seqs]
+    traj_starts = np.stack(evals)
+    errs = init_positions - traj_starts
+    errnorms = np.linalg.norm(errs[:, :2], axis=1)
+    # check if x,y coordinate of the robot start positions
+    # match with that of the initial trajectories
+    assert not np.any(np.abs(errnorms) > 0.1)
 
-    #
-    # DATA VALIDATION / PROCESSING
-    #
-
+    print("initial trajectory loading complete")
     # validate sequences w.r.t. each other
     assert all(len(seq) == steps for seq in seqs)
     for i in range(steps):
@@ -77,61 +114,10 @@ def main():
 
     print("validation complete")
 
-    #
-    # CRAZYSWARM INITIALIZATION
-    #
-    swarm = Crazyswarm()
-    timeHelper = swarm.timeHelper
-    allcfs = swarm.allcfs
-    crazyflies = allcfs.crazyflies
-
-    # support trials on <N robots
-    # if len(crazyflies) < N:
-    #     N = len(crazyflies)
-    #     seqs = seqs[:N]
-    #     C_matrices = C_matrices[:,:N,:]
-    # print("using", N, "crazyflies")
-
-    # transposed copy - by timestep instead of robot
-    seqs_t = zip(*seqs)
-
-    # check that crazyflies.yaml initial positions match sequences.
-    # only compare xy positions.
-    # assume that cf id numerical order matches sequence order,
-    # but id's don't need to be 1..N.
-    crazyflies = sorted(crazyflies, key=lambda cf: cf.id)
-    init_positions = np.stack([cf.initialPosition for cf in crazyflies])
-    evals = [seq[0].eval(0.0).pos for seq in seqs]
-    traj_starts = np.stack(evals)
-    errs = init_positions - traj_starts
-    errnorms = np.linalg.norm(errs[:, :2], axis=1)
-    assert not np.any(np.abs(errnorms) > 0.1)
-
     # planners for takeoff and landing
     planners = [firm.planner() for cf in crazyflies]
     for p in planners:
         firm.plan_init(p)
-
-    #
-    # ASSORTED OTHER SETUP
-    #
-
-    # local helper fn to set colors
-    # def set_colors(i):
-    #     for cf, color in zip(crazyflies, C_matrices[i]):
-    #         cf.setLEDColor(*color)
-
-    # timing parameters
-    timescale = 1.0
-    pause_between = 1.5
-    takeoff_time = 3.0
-    land_time = 4.0
-
-    #
-    # RUN DEMO
-    #
-
-    print("validation complete")
 
     # takeoff
     print("takeoff")
@@ -145,19 +131,30 @@ def main():
     poll_planners(crazyflies, timeHelper, planners, takeoff_time)
     end_pos = np.stack([cf.position() for cf in crazyflies])
 
-    # set to full capability colors
-    # set_colors(0)
 
     # pause - all is well...
     hover(crazyflies, timeHelper, end_pos, pause_between)
 
-    # set colors first capability loss
-    # set_colors(1)
+    # if everything goes well then the robot would have took off by now
+    # would be hover at the desired positions
 
-    # pause - reacting to capability loss
-    hover(crazyflies, timeHelper, end_pos, pause_between)
+    # transposed copy - by timestep instead of robot
+    seqs_t = zip(*seqs)
+
+    Rob_active_mat = np.ones((A_n, 1))  # matlab index of active robots
+
+
 
     # main loop!
+    for i_1 in range(A_n):
+        # randomly select a robot to fail
+        indx = math.floor(np.random.uniform()*Rob_active_mat.sum())
+        if indx == 0:
+            indx = 1
+        # TODO
+
+
+
     for step in range(steps):
 
         # move - new configuration after capability loss
