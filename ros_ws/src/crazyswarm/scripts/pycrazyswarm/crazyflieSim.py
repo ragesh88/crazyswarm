@@ -11,7 +11,7 @@ import cfsim.cffirmware as firm
 # also does the plotting.
 #
 class TimeHelper:
-    def __init__(self, vis, dt, writecsv):
+    def __init__(self, vis, dt, writecsv, disturbanceSize):
         if vis == "mpl":
             import visualizer.visMatplotlib
             self.visualizer = visualizer.visMatplotlib.VisMatplotlib()
@@ -23,6 +23,7 @@ class TimeHelper:
         self.t = 0.0
         self.dt = dt
         self.crazyflies = []
+        self.disturbanceSize = disturbanceSize
         if writecsv:
             import output
             self.output = output.Output()
@@ -34,6 +35,8 @@ class TimeHelper:
 
     def step(self, duration):
         self.t += duration
+        for cf in self.crazyflies:
+            cf.integrate(duration, self.disturbanceSize)
 
     # should be called "animate" or something
     # but called "sleep" for source-compatibility with real-robot scripts
@@ -44,9 +47,14 @@ class TimeHelper:
                 self.output.update(t, self.crazyflies)
             self.step(self.dt)
 
-    def nextPhase(self):
-        if self.output:
-            self.output.nextPhase()
+    # Mock for abstraction of rospy.Rate.sleep().
+    def sleepForRate(self, rate):
+        # TODO: account for rendering time, or is it worth the complexity?
+        self.sleep(1.0 / rate)
+
+    # Mock for abstraction of rospy.is_shutdown().
+    def isShutdown(self):
+        return False
 
     def addObserver(self, observer):
         self.observers.append(observer)
@@ -70,6 +78,8 @@ class Crazyflie:
         self.planner.lastKnownPosition = arr2vec(initialPosition)
         self.groupMask = 0
         self.trajectories = dict()
+        self.currentVelocity = None
+        self.velocityMode = False
 
         # for visualization - default to blueish-grey
         self.ledRGB = (0.5, 0.5, 1)
@@ -187,6 +197,26 @@ class Crazyflie:
         self.cmdHighLevel = False
         # TODO store other state variables
 
+    def cmdVelocityWorld(self, vel, yawRate):
+        self.currentVelocity = vel
+        self.cmdHighLevel = False
+        self.velocityMode = True
+
+    def cmdStop(self):
+        pass
+
+    def cmdPosition(self, pos, yaw = 0):
+        self.planner.lastKnownPosition = pos
+        self.cmdHighLevel = False
+        # TODO store other state variables
+
+    def integrate(self, time, disturbanceSize):
+        if self.velocityMode:
+            disturbance = disturbanceSize * np.random.normal(size=3)
+            self.planner.lastKnownPosition = self.position() + time * (self.currentVelocity + disturbance)
+            self.velocityMode = False
+
+
     # "private" methods
     def _isGroup(self, groupMask):
         return groupMask == 0 or (self.groupMask & groupMask) > 0
@@ -205,9 +235,20 @@ class Crazyflie:
 
 
 class CrazyflieServer:
-    def __init__(self, timeHelper):
-        with open("../launch/crazyflies.yaml", 'r') as ymlfile:
-            cfg = yaml.load(ymlfile)
+    def __init__(self, timeHelper, crazyflies_yaml="../launch/crazyflies.yaml"):
+        """Initialize the server.
+
+        Args:
+            timeHelper (TimeHelper): TimeHelper instance.
+            crazyflies_yaml (str): If ends in ".yaml", interpret as a path and load
+                from file. Otherwise, interpret as YAML string and parse
+                directly from string.
+        """
+        if crazyflies_yaml.endswith(".yaml"):
+            with open(crazyflies_yaml, 'r') as ymlfile:
+                cfg = yaml.load(ymlfile)
+        else:
+            cfg = yaml.load(crazyflies_yaml)
 
         self.crazyflies = []
         self.crazyfliesById = dict()
@@ -222,7 +263,7 @@ class CrazyflieServer:
         self.timeHelper.crazyflies = self.crazyflies
 
     def emergency(self):
-        print("WARNING: setParams not implemented in simulation!")
+        print("WARNING: emergency not implemented in simulation!")
 
     def takeoff(self, targetHeight, duration, groupMask = 0):
         for crazyflie in self.crazyflies:
@@ -238,8 +279,11 @@ class CrazyflieServer:
 
     def goTo(self, goal, yaw, duration, groupMask = 0):
         for crazyflie in self.crazyflies:
-            crazyflie.goTo(goal, yaw, duration, False, groupMask)
+            crazyflie.goTo(goal, yaw, duration, relative=True, groupMask=groupMask)
 
     def startTrajectory(self, trajectoryId, timescale = 1.0, reverse = False, relative = True, groupMask = 0):
         for crazyflie in self.crazyflies:
             crazyflie.startTrajectory(trajectoryId, timescale, reverse, relative, groupMask)
+
+    def setParam(self, name, value):
+        print("WARNING: setParam not implemented in simulation!")
