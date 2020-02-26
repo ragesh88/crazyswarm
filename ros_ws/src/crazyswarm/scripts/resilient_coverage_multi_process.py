@@ -1,5 +1,10 @@
 #!/usr/bin/env python
 
+"""
+This script is the does same function as resilient_coverage.py.
+This script contains the functions to perform multi processing
+"""
+
 from __future__ import print_function
 from get_rad_tune import get_rad_tune
 
@@ -9,12 +14,16 @@ import os.path
 import rospy
 import math
 
-import _multiprocessing
+import multiprocessing as multi
+import subprocess
+
+import time
 
 import numpy as np
 import csv
 
 import matlab.engine
+import matlab
 
 from pycrazyswarm import *
 import uav_trajectory
@@ -27,6 +36,8 @@ HOVER = 0
 MOVE = 1
 FAILED = 2
 LANDING = 3
+
+MATLAB_NAME = "crazyswarm"
 
 def main():
     # parser = argparse.ArgumentParser()
@@ -86,8 +97,18 @@ def main():
                               [0.0, 1.0, 1.5],
                               [0.0, 1.5, 1.5]]
 
+    # start a new one for parallel process
+    matlab_cmd = "matlab.engine.shareEngine('{}')".format(MATLAB_NAME)
+    matlab_process = subprocess.Popen(["matlab", "-nodesktop", "-r", matlab_cmd],
+                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE)
+    # wait will the matlab process is initiated
+    while not MATLAB_NAME in matlab.engine.find_matlab():
+        time.sleep(0.1)
+    print("MATLAB process ready.")
+
     # generate the initial coordinates and trajectory for the robots
-    eng = matlab.engine.start_matlab()
+    eng = matlab.engine.connect_matlab(MATLAB_NAME)
     eng.cd(init_pos_pth)
     eng.strt_exp_scrpt(nargout=0)
     eng.cd(init_pos_pth)
@@ -96,6 +117,13 @@ def main():
     Rob_active_pos = np.array(mat_out[0])
     b_box = np.array(mat_out[1])
     data_folder = mat_out[2]
+    # exit the matlab process
+    eng.quit()
+
+
+
+
+    queue = multi.Queue()
 
     # set active robots to color red
     for cf in crazyflies:
