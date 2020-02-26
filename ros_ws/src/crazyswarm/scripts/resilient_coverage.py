@@ -22,6 +22,12 @@ import uav_trajectory
 import pycrazyswarm.cfsim.cffirmware as firm
 
 
+# define the possible quadrotor states
+HOVER = 0
+MOVE = 1
+FAILED = 2
+LANDING = 3
+
 def main():
     # parser = argparse.ArgumentParser()
     # parser.add_argument("path",
@@ -47,11 +53,6 @@ def main():
 
     # parameters for the team
     A_n = 7  # number of robots
-    # define the possible quadrotor states
-    HOVER = 0
-    MOVE = 1
-    FAILED = 2
-    LANDING = 3
 
     #
     # CRAZYSWARM INITIALIZATION
@@ -77,24 +78,32 @@ def main():
     # make the robots to take off all together
     # initial start pos to generate trajectories for the robots
     # to find initial max coverage position
-    Rob_start_pos = np.array([[0.0, -1.5, 1.5],
+    Rob_start_pos = [[0.0, -1.5, 1.5],
                               [0.0, -1.0, 1.5],
                               [0.0, -0.5, 1.5],
                               [0.0, 0.0, 1.5],
                               [0.0, 0.5, 1.5],
                               [0.0, 1.0, 1.5],
-                              [0.0, 1.5, 1.5]])
+                              [0.0, 1.5, 1.5]]
 
     # generate the initial coordinates and trajectory for the robots
     eng = matlab.engine.start_matlab()
     eng.cd(init_pos_pth)
-    mat_out = eng.exp_init_traj(A_n, Rob_start_pos, data_folder, nargout=3)
+    eng.strt_exp_scrpt(nargout=0)
+    eng.cd(init_pos_pth)
+    mat_Rob_start_pos = matlab.double(Rob_start_pos)
+    mat_out = eng.exp_init_traj(A_n, mat_Rob_start_pos, data_folder, matlab.double([]), nargout=3)
     Rob_active_pos = mat_out[0]
     b_box = mat_out[1]
     data_folder = mat_out[2]
 
+    # set active robots to color red
+    for cf in crazyflies:
+        cf.setLEDColor(1, 0, 0)
+
     # ...trajectory sequences...
-    robot_dirs = sorted(os.listdir(data_folder), key=int)
+    print("data_folder")
+    robot_dirs = sorted(os.listdir(data_folder + '/trajectories/'), key=int)
     seqs = [load_all_csvs(os.path.join(data_folder, d)) for d in robot_dirs]
     steps = len(seqs[0])
 
@@ -144,14 +153,15 @@ def main():
     # transposed copy - by timestep instead of robot
     seqs_t = zip(*seqs)
 
+    # make the robot move to the desired positions
+    poll_trajs(crazyflies, timeHelper, seqs_t[0], timescale)
+
     Rob_active_mat = np.ones((A_n, 1))  # vector indicating active robots
     # list containing the matlab indices of the active robots
     Rob_active_lab_mat = range(1, A_n+1)
 
-
-
     # main loop!
-    for i_1 in range(A_n-1):
+    for i_1 in range(4):
         # get the position of all active robots
         j_1 = 0
         for lab in Rob_active_lab_mat:
@@ -169,19 +179,32 @@ def main():
         fail_rob_lab_mat = Rob_active_lab_mat[indx - 1]
         Rob_active_mat[fail_rob_lab_mat - 1] = 0
         # find the position of the failed robot
+        fail_rob_pos = 0.0
         for cf in crazyflies:
             if cf.id == Rob_lab2id[fail_rob_lab_mat]:
                 fail_rob_pos = cf.position()[:, 0:2]
         # get radius tune from the user
         rad_tune = get_rad_tune(b_box, Rob_active_lab_mat, fail_rob_lab_mat, Rob_active_pos, fail_rob_pos)
         # set state of failed robot and make it land
+        Rob_state[fail_rob_lab_mat] = LANDING
+        land(crazyflies, timeHelper, Rob_state, land_time)
+        # set the state of the failed robot to failed
         Rob_state[fail_rob_lab_mat] = FAILED
-        # land() # TODO add a function to make the robot land
+        # set the led color of the robot to black
+        for cf in crazyflies:
+            if cf.id == Rob_lab2id[fail_rob_lab_mat]:
+                cf.setLEDColor(0, 0, 0)
+                break
         # call the matlab function to get trajectories, robot labels in failed neighborhood
-        mat_out = matlab_get_trajectories(eng) # TODO complete this
-        fail_trjs = mat_out[0]  # trajectories of the robots in the failed robot nbh
-        fail_rob_nbh = mat_out[1]  # trajectories matches the elements and are sorted
-        com_rob_nbh = mat_out[2]
+        # mat_out = matlab_get_trajectories(eng)
+        mat_out = eng.exp_inter_traj(A_n, rad_tune, indx, Rob_active_lab_mat, Rob_active_pos,
+                                    data_folder, nargout=2)
+        # load the trajectories from the csv files
+        robot_dirs = sorted(os.listdir(data_folder + '/trajectories/'), key=int)
+        # trajectories of the robots in the failed robot nbh
+        fail_trjs = [load_all_csvs(os.path.join(data_folder, d)) for d in robot_dirs]
+        fail_rob_nbh = mat_out[0]  # trajectories matches the elements and are sorted
+        com_rob_nbh = mat_out[1]
         Rob_active_lab_mat = com_rob_nbh + fail_rob_nbh
         # set the states of the robots
         for lab in Rob_active_lab_mat:
@@ -189,43 +212,11 @@ def main():
                 Rob_state[lab] = MOVE
             if lab in com_rob_nbh:
                 Rob_state[lab] = HOVER
-
-
-
-
-
-
-
-    for step in range(steps):
-
-        # move - new configuration after capability loss
-        print("executing trajectory", step, "/", steps)
-        poll_trajs(crazyflies, timeHelper, seqs_t[step], timescale)
-        end_pos = np.stack([cf.position() for cf in crazyflies])
-
-        # done with this step's trajs - hover for a few sec
-        hover(crazyflies, timeHelper, end_pos, pause_between)
-
-        # change the LEDs - another capability loss
-        # if step < steps - 1:
-        #     set_colors(step + 2)
-
-        # hover some more
-        hover(crazyflies, timeHelper, end_pos, pause_between)
-
-    # land
-    print("landing")
-
-    end_pos = np.stack([cf.position() for cf in crazyflies])
-    for cf, p, pos in zip(crazyflies, planners, end_pos):
-        vposition = firm.mkvec(*pos)
-        firm.plan_land(p, vposition, 0.0, 0.06, land_time, 0.0)
-
-    poll_planners(crazyflies, timeHelper, planners, land_time)
-
-    # cut power
-    print("sequence complete.")
-    allcfs.emergency()
+        # execute the trajectories
+        my_poll_trajs(crazyflies, timeHelper, zip(*fail_trjs), timescale, Rob_state, com_rob_nbh, fail_rob_nbh)
+        # reset the robot states to hover
+        for lab in Rob_active_lab_mat:
+            Rob_state[lab] = HOVER
 
 
 def poll_trajs(crazyflies, timeHelper, trajs, timescale):
@@ -248,8 +239,7 @@ def poll_trajs(crazyflies, timeHelper, trajs, timescale):
         #timeHelper.sleep(1e-6)
 
 
-def my_poll_trajs(crazyflies, timeHelper, trajs, timescale, Robot_state, Rob_lab2id, Rob_id2lab,
-                  com_rob_nbh, fail_rob_nbh):
+def my_poll_trajs(crazyflies, timeHelper, trajs, timescale, Robot_state, com_rob_nbh, fail_rob_nbh):
     duration = trajs[0].duration
     rob_lab_mat = sorted(Robot_state.keys())
     start_time = rospy.Time.now()
@@ -272,8 +262,39 @@ def my_poll_trajs(crazyflies, timeHelper, trajs, timescale, Robot_state, Rob_lab
                     ev.omega)
             if lab in com_rob_nbh:
                 # they need to hover
-                indx = com_rob_nbh.index(lab)
                 cf.cmdFullState(
+                    cf.position(),
+                    zero,
+                    zero,
+                    0.0,
+                    zero)
+        rate.sleep()
+
+
+def land(crazyflies, timeHelper, Robot_state, duration):
+    start_time = rospy.Time.now()
+    rate = rospy.Rate(100)  # hz
+    rob_lab_mat = sorted(Robot_state.keys())
+    zero = np.zeros(3)
+    while not rospy.is_shutdown():
+        t = (rospy.Time.now() - start_time).to_sec()
+        if t > duration:
+            break
+        for cf, lab in zip(crazyflies, rob_lab_mat):
+            if Robot_state[lab] == LANDING:
+                # command the drone to land
+                pos = cf.position()
+                pos[0, 2] = 0.0
+                cf.cmdFullState(
+                    pos,
+                    zero,
+                    zero,
+                    0.0,
+                    zero)
+            else:
+                if Robot_state[lab] != FAILED:
+                    # make the non failed robots hover
+                    cf.cmdFullState(
                     cf.position(),
                     zero,
                     zero,
@@ -303,7 +324,7 @@ def poll_planners(crazyflies, timeHelper, planners, duration):
 
 def hover(crazyflies, timeHelper, positions, duration):
     start_time = rospy.Time.now()
-    rate = rospy.Rate(100) # hz
+    rate = rospy.Rate(100)  # hz
     zero = np.zeros(3)
     while not rospy.is_shutdown():
         t = (rospy.Time.now() - start_time).to_sec()
