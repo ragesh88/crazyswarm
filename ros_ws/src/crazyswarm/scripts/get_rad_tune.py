@@ -29,8 +29,8 @@ def get_rad_tune(b_box, Rob_active_lab, fail_rob_lab, Rob_active_pos,
         rob_act_cns.append([int((Rob_active_pos[i, 0] - b_box[0, 0])*scale) + cns_orgin[0],
                             canvas_h - int((Rob_active_pos[i, 1] - b_box[1, 0])*scale + cns_orgin[1])])
     # compute the fail robot canvas coordinates
-    fail_rob_pos_cns = [int((fail_rob_pos[0, 0] - b_box[0, 0])*scale) + cns_orgin[0],
-                        canvas_h - int((fail_rob_pos[0, 1] - b_box[1, 0])*scale + cns_orgin[1])]
+    fail_rob_pos_cns = [int((fail_rob_pos[0] - b_box[0, 0])*scale) + cns_orgin[0],
+                        canvas_h - int((fail_rob_pos[1] - b_box[1, 0])*scale + cns_orgin[1])]
     # radius in canvas
     rad_tune_cns = int(rad_tune*scale)
 

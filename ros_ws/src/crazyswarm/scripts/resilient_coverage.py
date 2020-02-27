@@ -6,7 +6,6 @@ from get_rad_tune import get_rad_tune
 import argparse
 import os
 import os.path
-import rospy
 import math
 
 import _multiprocessing
@@ -27,6 +26,7 @@ HOVER = 0
 MOVE = 1
 FAILED = 2
 LANDING = 3
+POLL_RATE = 100  # Hz
 
 def main():
     # parser = argparse.ArgumentParser()
@@ -166,13 +166,13 @@ def main():
         for lab in Rob_active_lab_mat:
             for cf in crazyflies:
                 if cf.id == Rob_lab2id[lab]:
-                    Rob_active_pos[j_1, :] = cf.position()[:, 0:2]
+                    Rob_active_pos[j_1, :] = cf.position()[0:2]
                     j_1 += 1
                     break
-        Rob_active_pos = Rob_active_pos[:, 0:j_1]
+        Rob_active_pos = Rob_active_pos[0:j_1, :]
         # randomly select a robot to fail
         # we assume its a matlab index
-        indx = math.floor(np.random.uniform()*(Rob_active_mat.sum()))
+        indx = int(math.floor(np.random.uniform()*(Rob_active_mat.sum())))
         if indx == 0:
             indx = 1
         fail_rob_lab_mat = Rob_active_lab_mat[indx - 1]
@@ -181,30 +181,46 @@ def main():
         fail_rob_pos = 0.0
         for cf in crazyflies:
             if cf.id == Rob_lab2id[fail_rob_lab_mat]:
-                fail_rob_pos = cf.position()[:, 0:2]
+                fail_rob_pos = cf.position()[0:2]
         # get radius tune from the user
+        # TODO uncomment below after debugging
         rad_tune = get_rad_tune(b_box, Rob_active_lab_mat, fail_rob_lab_mat, Rob_active_pos, fail_rob_pos)
-        # set state of failed robot and make it land
-        Rob_state[fail_rob_lab_mat] = LANDING
-        land(crazyflies, timeHelper, Rob_state, land_time)
-        # set the state of the failed robot to failed
-        Rob_state[fail_rob_lab_mat] = FAILED
         # set the led color of the robot to black
         for cf in crazyflies:
             if cf.id == Rob_lab2id[fail_rob_lab_mat]:
                 cf.setLEDColor(0, 0, 0)
                 break
+        # set state of failed robot and make it land
+        Rob_state[fail_rob_lab_mat] = LANDING
+        land(crazyflies, timeHelper, Rob_state, land_time)
+        # set the state of the failed robot to failed
+        Rob_state[fail_rob_lab_mat] = FAILED
         # call the matlab function to get trajectories, robot labels in failed neighborhood
         # mat_out = matlab_get_trajectories(eng)
-        mat_out = eng.exp_inter_traj(A_n, rad_tune, indx, matlab.double(Rob_active_lab_mat),
+        mat_out = eng.exp_inter_traj(A_n, rad_tune, indx,
+                                     matlab.double(Rob_active_lab_mat),
                                      matlab.double(Rob_active_pos.tolist()), data_folder, nargout=2)
         # load the trajectories from the csv files
         robot_dirs = sorted(os.listdir(data_folder + '/trajectories/'), key=int)
         # trajectories of the robots in the failed robot nbh
         fail_trjs = [load_all_csvs(os.path.join(data_folder + '/trajectories', d)) for d in robot_dirs]
-        fail_rob_nbh = mat_out[0]  # trajectories matches the elements and are sorted
-        com_rob_nbh = mat_out[1]
-        Rob_active_lab_mat = com_rob_nbh + fail_rob_nbh
+        fail_rob_nbh = np.array(mat_out[0]).tolist()  # trajectories matches the elements and are sorted
+        fail_rob_nbh = [int(f[0]) for f in fail_rob_nbh]
+        com_rob_nbh = np.array(mat_out[1]).tolist()
+        if type(com_rob_nbh) != float and len(com_rob_nbh) > 0:
+            com_rob_nbh = [int(f[0]) for f in com_rob_nbh]
+            Rob_active_lab_mat = com_rob_nbh + fail_rob_nbh
+        else:
+            if type(com_rob_nbh) == float:
+                Rob_active_lab_mat = fail_rob_nbh
+                Rob_active_lab_mat.append(int(com_rob_nbh))
+                com_rob_nbh = [int(com_rob_nbh)]
+            else:
+                Rob_active_lab_mat = fail_rob_nbh
+                com_rob_nbh = []
+        print("Fail label", mat_out[0])
+        print("Com label", mat_out[1])
+        print("Active label", Rob_active_lab_mat)
         # set the states of the robots
         for lab in Rob_active_lab_mat:
             if lab in fail_rob_nbh:
@@ -212,6 +228,7 @@ def main():
             if lab in com_rob_nbh:
                 Rob_state[lab] = HOVER
         # execute the trajectories
+        print("traj : ", zip(*fail_trjs))
         my_poll_trajs(crazyflies, timeHelper, zip(*fail_trjs), timescale, Rob_state, com_rob_nbh, fail_rob_nbh)
         # reset the robot states to hover
         for lab in Rob_active_lab_mat:
@@ -220,10 +237,9 @@ def main():
 
 def poll_trajs(crazyflies, timeHelper, trajs, timescale):
     duration = trajs[0].duration
-    start_time = rospy.Time.now()
-    rate = rospy.Rate(100) # hz
-    while not rospy.is_shutdown():
-        t = (rospy.Time.now() - start_time).to_sec() / timescale
+    start_time = timeHelper.time()
+    while not timeHelper.isShutdown():
+        t = (timeHelper.time() - start_time) / timescale
         if t > duration:
             break
         for cf, traj in zip(crazyflies, trajs):
@@ -234,18 +250,16 @@ def poll_trajs(crazyflies, timeHelper, trajs, timescale):
                 ev.acc,
                 ev.yaw,
                 ev.omega)
-        rate.sleep()
-        #timeHelper.sleep(1e-6)
+        timeHelper.sleepForRate(POLL_RATE)
 
 
 def my_poll_trajs(crazyflies, timeHelper, trajs, timescale, Robot_state, com_rob_nbh, fail_rob_nbh):
     duration = trajs[0].duration
     rob_lab_mat = sorted(Robot_state.keys())
-    start_time = rospy.Time.now()
-    rate = rospy.Rate(100)  # hz
+    start_time = timeHelper.time()
     zero = np.zeros(3)
-    while not rospy.is_shutdown():
-        t = (rospy.Time.now() - start_time).to_sec() / timescale
+    while not timeHelper.isShutdown():
+        t = (timeHelper.time() - start_time) / timescale
         if t > duration:
             break
         for cf, lab in zip(crazyflies, rob_lab_mat):
@@ -267,23 +281,22 @@ def my_poll_trajs(crazyflies, timeHelper, trajs, timescale, Robot_state, com_rob
                     zero,
                     0.0,
                     zero)
-        rate.sleep()
+        timeHelper.sleepForRate(POLL_RATE)
 
 
 def land(crazyflies, timeHelper, Robot_state, duration):
-    start_time = rospy.Time.now()
-    rate = rospy.Rate(100)  # hz
+    start_time = timeHelper.time()
     rob_lab_mat = sorted(Robot_state.keys())
     zero = np.zeros(3)
-    while not rospy.is_shutdown():
-        t = (rospy.Time.now() - start_time).to_sec()
+    while not timeHelper.isShutdown():
+        t = (timeHelper.time() - start_time)
         if t > duration:
             break
         for cf, lab in zip(crazyflies, rob_lab_mat):
             if Robot_state[lab] == LANDING:
                 # command the drone to land
                 pos = cf.position()
-                pos[0, 2] = 0.0
+                pos[2] = 0.0
                 cf.cmdFullState(
                     pos,
                     zero,
@@ -299,14 +312,13 @@ def land(crazyflies, timeHelper, Robot_state, duration):
                     zero,
                     0.0,
                     zero)
-        rate.sleep()
+        timeHelper.sleepForRate(POLL_RATE)
 
 
 def poll_planners(crazyflies, timeHelper, planners, duration):
-    start_time = rospy.Time.now()
-    rate = rospy.Rate(100) # hz
-    while not rospy.is_shutdown():
-        t = (rospy.Time.now() - start_time).to_sec()
+    start_time = timeHelper.time()
+    while not timeHelper.isShutdown():
+        t = timeHelper.time() - start_time
         if t > duration:
             break
         for cf, planner in zip(crazyflies, planners):
@@ -317,16 +329,14 @@ def poll_planners(crazyflies, timeHelper, planners, duration):
                 firm2arr(ev.acc),
                 ev.yaw,
                 firm2arr(ev.omega))
-        rate.sleep()
-        #timeHelper.sleep(1e-6)
+        timeHelper.sleepForRate(POLL_RATE)
 
 
 def hover(crazyflies, timeHelper, positions, duration):
-    start_time = rospy.Time.now()
-    rate = rospy.Rate(100)  # hz
+    start_time = timeHelper.time()
     zero = np.zeros(3)
-    while not rospy.is_shutdown():
-        t = (rospy.Time.now() - start_time).to_sec()
+    while not timeHelper.isShutdown():
+        t = timeHelper.time() - start_time
         if t > duration:
             break
         for cf, pos in zip(crazyflies, positions):
@@ -336,8 +346,8 @@ def hover(crazyflies, timeHelper, positions, duration):
                 zero,
                 0.0,
                 zero)
-        rate.sleep()
-        #timeHelper.sleep(1e-6)
+        timeHelper.sleepForRate(POLL_RATE)
+
 
 
 def firm2arr(vec):
