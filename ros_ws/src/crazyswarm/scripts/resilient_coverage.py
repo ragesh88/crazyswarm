@@ -8,6 +8,8 @@ import os
 import os.path
 import math
 
+import pdb
+
 import _multiprocessing
 
 import numpy as np
@@ -172,7 +174,9 @@ def main():
         Rob_active_pos = Rob_active_pos[0:j_1, :]
         # randomly select a robot to fail
         # we assume its a matlab index
-        indx = int(math.floor(np.random.uniform()*(Rob_active_mat.sum())))
+        indx = 6
+        # TODO uncomment below after debugging
+        # indx = int(math.floor(np.random.uniform()*(Rob_active_mat.sum())))
         if indx == 0:
             indx = 1
         fail_rob_lab_mat = Rob_active_lab_mat[indx - 1]
@@ -206,6 +210,7 @@ def main():
         fail_trjs = [load_all_csvs(os.path.join(data_folder + '/trajectories', d)) for d in robot_dirs]
         fail_rob_nbh = np.array(mat_out[0]).tolist()  # trajectories matches the elements and are sorted
         fail_rob_nbh = [int(f[0]) for f in fail_rob_nbh]
+        fail_rob_nbh = sorted(fail_rob_nbh)
         com_rob_nbh = np.array(mat_out[1]).tolist()
         if type(com_rob_nbh) != float and len(com_rob_nbh) > 0:
             com_rob_nbh = [int(f[0]) for f in com_rob_nbh]
@@ -218,8 +223,8 @@ def main():
             else:
                 Rob_active_lab_mat = fail_rob_nbh
                 com_rob_nbh = []
-        print("Fail label", mat_out[0])
-        print("Com label", mat_out[1])
+        print("Fail label", fail_rob_nbh)
+        print("Com label", com_rob_nbh)
         print("Active label", Rob_active_lab_mat)
         # set the states of the robots
         for lab in Rob_active_lab_mat:
@@ -228,8 +233,8 @@ def main():
             if lab in com_rob_nbh:
                 Rob_state[lab] = HOVER
         # execute the trajectories
-        print("traj : ", zip(*fail_trjs))
-        my_poll_trajs(crazyflies, timeHelper, zip(*fail_trjs), timescale, Rob_state, com_rob_nbh, fail_rob_nbh)
+        fail_trjs_t = zip(*fail_trjs)
+        my_poll_trajs(crazyflies, timeHelper, fail_trjs_t[0], timescale, Rob_state, com_rob_nbh, fail_rob_nbh)
         # reset the robot states to hover
         for lab in Rob_active_lab_mat:
             Rob_state[lab] = HOVER
@@ -265,6 +270,7 @@ def my_poll_trajs(crazyflies, timeHelper, trajs, timescale, Robot_state, com_rob
         for cf, lab in zip(crazyflies, rob_lab_mat):
             if lab in fail_rob_nbh:
                 # they need to move
+                pdb.set_trace()
                 indx = fail_rob_nbh.index(lab)
                 ev = trajs[indx].eval(t)
                 cf.cmdFullState(
