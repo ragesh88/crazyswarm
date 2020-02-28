@@ -17,6 +17,7 @@ import multiprocessing as multi
 import subprocess
 
 import time
+import copy
 
 import numpy as np
 import csv
@@ -292,14 +293,14 @@ def traj_rad_process(queue, b_box, Rob_active_lab_mat,
     com_rob_nbh = np.array(mat_out[1]).tolist()
     if type(com_rob_nbh) != float and len(com_rob_nbh) > 0:
         com_rob_nbh = [int(f[0]) for f in com_rob_nbh]
-        Rob_active_lab_mat = com_rob_nbh + fail_rob_nbh
+        Rob_active_lab_mat = copy.deepcopy(com_rob_nbh + fail_rob_nbh)
     else:
         if type(com_rob_nbh) == float:
-            Rob_active_lab_mat = fail_rob_nbh
+            Rob_active_lab_mat = copy.deepcopy(fail_rob_nbh)
             Rob_active_lab_mat.append(int(com_rob_nbh))
             com_rob_nbh = [int(com_rob_nbh)]
         else:
-            Rob_active_lab_mat = fail_rob_nbh
+            Rob_active_lab_mat = copy.deepcopy(fail_rob_nbh)
             com_rob_nbh = []
     queue.put(fail_rob_nbh)
     queue.put(com_rob_nbh)

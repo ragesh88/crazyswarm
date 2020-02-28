@@ -9,6 +9,7 @@ import os.path
 import math
 
 import pdb
+import copy
 
 import _multiprocessing
 
@@ -174,9 +175,7 @@ def main():
         Rob_active_pos = Rob_active_pos[0:j_1, :]
         # randomly select a robot to fail
         # we assume its a matlab index
-        indx = 6
-        # TODO uncomment below after debugging
-        # indx = int(math.floor(np.random.uniform()*(Rob_active_mat.sum())))
+        indx = int(math.floor(np.random.uniform()*(Rob_active_mat.sum())))
         if indx == 0:
             indx = 1
         fail_rob_lab_mat = Rob_active_lab_mat[indx - 1]
@@ -214,14 +213,14 @@ def main():
         com_rob_nbh = np.array(mat_out[1]).tolist()
         if type(com_rob_nbh) != float and len(com_rob_nbh) > 0:
             com_rob_nbh = [int(f[0]) for f in com_rob_nbh]
-            Rob_active_lab_mat = com_rob_nbh + fail_rob_nbh
+            Rob_active_lab_mat = copy.deepcopy(com_rob_nbh + fail_rob_nbh)
         else:
             if type(com_rob_nbh) == float:
-                Rob_active_lab_mat = fail_rob_nbh
+                Rob_active_lab_mat = copy.deepcopy(fail_rob_nbh)
                 Rob_active_lab_mat.append(int(com_rob_nbh))
                 com_rob_nbh = [int(com_rob_nbh)]
             else:
-                Rob_active_lab_mat = fail_rob_nbh
+                Rob_active_lab_mat = copy.deepcopy(fail_rob_nbh)
                 com_rob_nbh = []
         print("Fail label", fail_rob_nbh)
         print("Com label", com_rob_nbh)
@@ -270,7 +269,6 @@ def my_poll_trajs(crazyflies, timeHelper, trajs, timescale, Robot_state, com_rob
         for cf, lab in zip(crazyflies, rob_lab_mat):
             if lab in fail_rob_nbh:
                 # they need to move
-                pdb.set_trace()
                 indx = fail_rob_nbh.index(lab)
                 ev = trajs[indx].eval(t)
                 cf.cmdFullState(
