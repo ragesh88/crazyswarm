@@ -38,6 +38,7 @@ def get_rad_tune(b_box, Rob_active_lab, fail_rob_lab, Rob_active_pos,
     marker_size = 10
 
     master = tk.Tk()
+    master.wm_title("Please select the neighborhood size.")
 
     w = tk.Canvas(master, width=canvas_w, height=canvas_h)
 
@@ -87,6 +88,7 @@ def get_rad_tune(b_box, Rob_active_lab, fail_rob_lab, Rob_active_pos,
     tk.mainloop()
     # return selected radius
     rad_tune = w1.get()
+    master.destroy()
     # print "inside function", rad_tune
     return rad_tune
 

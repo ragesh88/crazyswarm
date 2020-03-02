@@ -8,6 +8,8 @@ import os
 import os.path
 import math
 
+import tempfile
+
 import pdb
 import copy
 
@@ -47,6 +49,7 @@ def main():
     reconf_pos_pth = './resilient_coverage_team_selection/experiments/'
     # path to the folder containing the generated path
     data_folder = '/media/ragesh/Disk1/data/resilient_coverage/exp/'
+    data_folder = tempfile.mkdtemp()
 
     # timing parameters
     timescale = 1.0
@@ -182,17 +185,18 @@ def main():
         Rob_active_mat[fail_rob_lab_mat - 1] = 0
         # find the position of the failed robot
         fail_rob_pos = 0.0
+        # set the led color of the robot to black
+        for cf in crazyflies:
+            if cf.id == Rob_lab2id[fail_rob_lab_mat]:
+                cf.setLEDColor(0, 0, 0)
+                break
         for cf in crazyflies:
             if cf.id == Rob_lab2id[fail_rob_lab_mat]:
                 fail_rob_pos = cf.position()[0:2]
         # get radius tune from the user
         # TODO uncomment below after debugging
         rad_tune = get_rad_tune(b_box, Rob_active_lab_mat, fail_rob_lab_mat, Rob_active_pos, fail_rob_pos)
-        # set the led color of the robot to black
-        for cf in crazyflies:
-            if cf.id == Rob_lab2id[fail_rob_lab_mat]:
-                cf.setLEDColor(0, 0, 0)
-                break
+
         # set state of failed robot and make it land
         Rob_state[fail_rob_lab_mat] = LANDING
         land(crazyflies, timeHelper, Rob_state, land_time)
